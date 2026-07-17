@@ -19,12 +19,14 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.behavior.Swim;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.animal.equine.SkeletonHorse;
@@ -92,9 +94,10 @@ public class EntityFluidInteractionTests {
 
     /**
      * Named milk so the tests read like a concrete mod fluid.
-     * Its fluid type is intentionally water-like for the behavior under test.
+     * Its fluid type is intentionally water-like, and it also supports the
+     * entity hydration hook used by the calcium-absorbing skeleton horse test.
      */
-    private static final FluidFixture<FluidType> MILK = new FluidFixture<>("milk", () -> new FluidType(FluidType.Properties.create()
+    private static final FluidFixture<MilkFluidType> MILK = new FluidFixture<>("milk", () -> new MilkFluidType(FluidType.Properties.create()
             .descriptionId("fluid_type.neotests_entity_fluid_interaction.milk")
             .canDrown(true)
             .canSwim(true)
@@ -820,6 +823,48 @@ public class EntityFluidInteractionTests {
     }
 
     @GameTest(timeoutTicks = 200)
+    @EmptyTemplate(value = "13x7x5", floor = true)
+    @TestHolder(description = "Tests custom fluid entity hydration hook against water and lava controls")
+    static void customFluidEntityHydrationHook(final TestHelper helper) {
+        final BlockPos milkPos = new BlockPos(1, 2, 2);
+        final BlockPos waterPos = new BlockPos(4, 2, 2);
+        final BlockPos lavaPos = new BlockPos(7, 2, 2);
+        final BlockPos dryPos = new BlockPos(10, 2, 2);
+        helper.fillFluidColumn(MILK, milkPos);
+        helper.fillFluidColumn(WATER, waterPos);
+        helper.fillFluidColumn(LAVA, lavaPos);
+
+        final CalciumAbsorbingSkeletonHorse milkHorse = helper.spawnCalciumAbsorbingSkeletonHorse(milkPos);
+        final CalciumAbsorbingSkeletonHorse waterHorse = helper.spawnCalciumAbsorbingSkeletonHorse(waterPos);
+        final CalciumAbsorbingSkeletonHorse lavaHorse = helper.spawnCalciumAbsorbingSkeletonHorse(lavaPos);
+        final CalciumAbsorbingSkeletonHorse dryHorse = helper.spawnCalciumAbsorbingSkeletonHorse(dryPos);
+        final float normalWidth = milkHorse.getBbWidth();
+        final float normalHeight = milkHorse.getBbHeight();
+        final MilkFluidType milkType = MILK.type();
+        final int hydrationChecksBefore = milkType.hydrationChecks.get();
+
+        helper.startSequence()
+                .thenExecuteAfter(2, () -> {
+                    helper.assertNormalSkeletonHorse(milkHorse, normalWidth, normalHeight, "milk");
+                    helper.assertNormalSkeletonHorse(waterHorse, normalWidth, normalHeight, "water");
+                    helper.assertNormalSkeletonHorse(lavaHorse, normalWidth, normalHeight, "lava");
+                    helper.assertNormalSkeletonHorse(dryHorse, normalWidth, normalHeight, "dry air");
+
+                    helper.assertFalse(waterHorse.absorbCalciumFromCurrentFluid(), "Water should leave the skeleton horse at normal size");
+                    helper.assertFalse(lavaHorse.absorbCalciumFromCurrentFluid(), "Lava should leave the skeleton horse at normal size");
+                    helper.assertFalse(dryHorse.absorbCalciumFromCurrentFluid(), "Dry air should leave the skeleton horse at normal size");
+                    helper.assertTrue(milkHorse.absorbCalciumFromCurrentFluid(), "Milk should let the skeleton horse absorb calcium");
+
+                    helper.assertValueEqual(hydrationChecksBefore + 1, milkType.hydrationChecks.get(), "Milk should receive one entity hydration hook check");
+                    helper.assertGiantSkeletonHorse(milkHorse, normalWidth, normalHeight, "milk");
+                    helper.assertNormalSkeletonHorse(waterHorse, normalWidth, normalHeight, "water");
+                    helper.assertNormalSkeletonHorse(lavaHorse, normalWidth, normalHeight, "lava");
+                    helper.assertNormalSkeletonHorse(dryHorse, normalWidth, normalHeight, "dry air");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(timeoutTicks = 200)
     @EmptyTemplate(value = "9x6x3", floor = true)
     @TestHolder(description = "Tests experience orb movement in water-like custom fluid against water and lava controls")
     static void waterLikeCustomFluidExperienceOrbMovement(final TestHelper helper) {
@@ -1016,6 +1061,18 @@ public class EntityFluidInteractionTests {
             this.assertValueEqual(expectedFallDistance, entity.fallDistance, message);
         }
 
+        void assertNormalSkeletonHorse(CalciumAbsorbingSkeletonHorse horse, float normalWidth, float normalHeight, String fluidName) {
+            this.assertFalse(horse.isGiant(), "Skeleton horse in " + fluidName + " should keep normal size");
+            this.assertValueEqual(normalWidth, horse.getBbWidth(), "Skeleton horse in " + fluidName + " should keep normal width");
+            this.assertValueEqual(normalHeight, horse.getBbHeight(), "Skeleton horse in " + fluidName + " should keep normal height");
+        }
+
+        void assertGiantSkeletonHorse(CalciumAbsorbingSkeletonHorse horse, float normalWidth, float normalHeight, String fluidName) {
+            this.assertTrue(horse.isGiant(), "Skeleton horse in " + fluidName + " should become giant");
+            this.assertTrue(horse.getBbWidth() > normalWidth, "Skeleton horse in " + fluidName + " should grow wider");
+            this.assertTrue(horse.getBbHeight() > normalHeight, "Skeleton horse in " + fluidName + " should grow taller");
+        }
+
         void fillFluidColumn(FluidFixture<?> fluid, BlockPos pos) {
             final BlockState fluidBlock = fluid.blockState();
             this.setBlock(pos, fluidBlock);
@@ -1079,6 +1136,14 @@ public class EntityFluidInteractionTests {
 
         NoisySkeletonHorse spawnNoisySkeletonHorse(BlockPos pos) {
             final NoisySkeletonHorse horse = new NoisySkeletonHorse(this.getLevel());
+            horse.setNoAi(true);
+            horse.snapTo(this.feetAt(pos));
+            this.getLevel().addFreshEntity(horse);
+            return horse;
+        }
+
+        CalciumAbsorbingSkeletonHorse spawnCalciumAbsorbingSkeletonHorse(BlockPos pos) {
+            final CalciumAbsorbingSkeletonHorse horse = new CalciumAbsorbingSkeletonHorse(this.getLevel());
             horse.setNoAi(true);
             horse.snapTo(this.feetAt(pos));
             this.getLevel().addFreshEntity(horse);
@@ -1182,6 +1247,20 @@ public class EntityFluidInteractionTests {
         }
     }
 
+    private static final class MilkFluidType extends FluidType {
+        private final AtomicInteger hydrationChecks = new AtomicInteger();
+
+        private MilkFluidType(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public boolean canHydrate(Entity entity) {
+            this.hydrationChecks.incrementAndGet();
+            return entity instanceof CalciumAbsorbingSkeletonHorse;
+        }
+    }
+
     /**
      * Isolates the non-damaging {@link LivingDrownEvent} branch from vanilla drowning damage.
      */
@@ -1224,6 +1303,38 @@ public class EntityFluidInteractionTests {
 
         private SoundEvent exposedAmbientSound() {
             return this.getAmbientSound();
+        }
+    }
+
+    private static class CalciumAbsorbingSkeletonHorse extends SkeletonHorse {
+        private static final float GIANT_SCALE = 2.0F;
+        private boolean giant;
+
+        private CalciumAbsorbingSkeletonHorse(Level level) {
+            super(EntityTypes.SKELETON_HORSE, level);
+        }
+
+        private boolean absorbCalciumFromCurrentFluid() {
+            final boolean canAbsorbCalcium = this.getFluidInteraction().isInFluidMatching(this, CalciumAbsorbingSkeletonHorse::canAbsorbCalciumFrom);
+            if (canAbsorbCalcium && !this.giant) {
+                this.giant = true;
+                this.refreshDimensions();
+            }
+            return canAbsorbCalcium;
+        }
+
+        private boolean canAbsorbCalciumFrom(FluidType type, double height) {
+            return type instanceof MilkFluidType && this.canHydrateInFluidType(type);
+        }
+
+        private boolean isGiant() {
+            return this.giant;
+        }
+
+        @Override
+        public EntityDimensions getDefaultDimensions(Pose pose) {
+            final EntityDimensions dimensions = super.getDefaultDimensions(pose);
+            return this.giant ? dimensions.scale(GIANT_SCALE) : dimensions;
         }
     }
 }
