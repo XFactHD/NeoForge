@@ -1,5 +1,33 @@
 --- a/com/mojang/blaze3d/platform/Window.java
 +++ b/com/mojang/blaze3d/platform/Window.java
+@@ -118,4 +_,17 @@
+-        this.setMode();
++        if (net.neoforged.neoforge.client.loading.earlydisplay.EarlyWindowHandoff.isReusedGlfwWindow(this.handle)) {
++            int[] actualX = new int[1];
++            int[] actualY = new int[1];
++            GLFW.glfwGetWindowPos(this.handle, actualX, actualY);
++            this.windowedX = this.x = actualX[0];
++            this.windowedY = this.y = actualY[0];
++            GLFW.glfwGetWindowSize(this.handle, actualX, actualY);
++            this.windowedWidth = this.width = allowedWindowMinSize(actualX[0]);
++            this.windowedHeight = this.height = allowedWindowMinSize(actualY[0]);
++            this.iconified = GLFW.glfwGetWindowAttrib(this.handle, GLFW.GLFW_ICONIFIED) == GLFW.GLFW_TRUE;
++            this.focused = GLFW.glfwGetWindowAttrib(this.handle, GLFW.GLFW_FOCUSED) == GLFW.GLFW_TRUE;
++        } else {
++            this.setMode();
++        }
+         this.refreshFramebufferSize();
+         GLFW.glfwSetFramebufferSizeCallback(this.handle, this::onFramebufferResize);
+         GLFW.glfwSetWindowPosCallback(this.handle, this::onMove);
+@@ -148,3 +_,8 @@
+     private long createWindow(GpuBackend backend, int width, int height, String title, long initialMonitor) throws BackendCreationException {
++        long earlyWindow = net.neoforged.neoforge.client.loading.earlydisplay.EarlyWindowHandoff.tryTakeOverGlfwWindow(backend);
++        if (earlyWindow != 0L) {
++            GLFW.glfwSetWindowTitle(earlyWindow, title);
++            return earlyWindow;
++        }
+         return createGlfwWindow(width, height, title, initialMonitor, backend);
+     }
 @@ -237,11 +_,11 @@
      }
  
