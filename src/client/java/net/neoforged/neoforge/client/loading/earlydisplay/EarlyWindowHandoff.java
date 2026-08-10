@@ -5,7 +5,9 @@
 
 package net.neoforged.neoforge.client.loading.earlydisplay;
 
+import com.mojang.blaze3d.platform.MacosUtil;
 import com.mojang.blaze3d.platform.Window;
+import net.neoforged.fml.earlydisplay.DisplayWindow;
 import net.neoforged.fml.loading.EarlyLoadingScreenController;
 import org.lwjgl.glfw.GLFW;
 
@@ -18,27 +20,34 @@ public final class EarlyWindowHandoff {
             return;
         }
 
+        boolean nativeFullscreen = MacosUtil.IS_MACOS
+                && earlyLoadingScreen instanceof DisplayWindow displayWindow
+                && MacosUtil.isInNativeFullscreen(displayWindow.getWindowHandle());
         EarlyLoadingScreenController.WindowState state = earlyLoadingScreen.handOverToMinecraft(() -> new Blaze3DRenderBackend(window));
-        restoreWindowState(window.handle(), state);
+        restoreWindowState(window, state, nativeFullscreen);
     }
 
-    private static void restoreWindowState(long window, EarlyLoadingScreenController.WindowState state) {
+    private static void restoreWindowState(Window window, EarlyLoadingScreenController.WindowState state, boolean nativeFullscreen) {
+        long windowHandle = window.handle();
         if (state.posValid() && !state.minimized()) {
-            GLFW.glfwSetWindowPos(window, state.x(), state.y());
+            GLFW.glfwSetWindowPos(windowHandle, state.x(), state.y());
         }
 
         if (state.maximized()) {
             // A maximized window reports its maximized size, not its restore size.
-            GLFW.glfwMaximizeWindow(window);
+            GLFW.glfwMaximizeWindow(windowHandle);
         } else {
-            GLFW.glfwSetWindowSize(window, state.width(), state.height());
+            GLFW.glfwSetWindowSize(windowHandle, state.width(), state.height());
         }
 
-        if (state.minimized()) {
-            GLFW.glfwIconifyWindow(window);
+        if (state.minimized() && !window.isFullscreen()) {
+            GLFW.glfwIconifyWindow(windowHandle);
             GLFW.glfwPollEvents();
         } else {
-            GLFW.glfwShowWindow(window);
+            GLFW.glfwShowWindow(windowHandle);
+            if (nativeFullscreen) {
+                MacosUtil.enterNativeFullscreen(window);
+            }
         }
     }
 
