@@ -23,7 +23,7 @@ public final class EarlyWindowHandoff {
     }
 
     private static void restoreWindowState(long window, EarlyLoadingScreenController.WindowState state) {
-        if (state.posValid()) {
+        if (state.posValid() && !state.minimized()) {
             GLFW.glfwSetWindowPos(window, state.x(), state.y());
         }
 
