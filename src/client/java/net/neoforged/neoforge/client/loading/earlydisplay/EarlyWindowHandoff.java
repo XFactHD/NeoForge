@@ -22,7 +22,7 @@ public final class EarlyWindowHandoff {
 
         boolean nativeFullscreen = MacosUtil.IS_MACOS
                 && earlyLoadingScreen instanceof DisplayWindow displayWindow
-                && MacosUtil.isInNativeFullscreen(displayWindow.getWindowHandle());
+                && isInNativeFullscreen(displayWindow.getWindowHandle());
         EarlyLoadingScreenController.WindowState state = earlyLoadingScreen.handOverToMinecraft(() -> new Blaze3DRenderBackend(window));
         restoreWindowState(window, state, nativeFullscreen);
     }
@@ -46,9 +46,19 @@ public final class EarlyWindowHandoff {
         } else {
             GLFW.glfwShowWindow(windowHandle);
             if (nativeFullscreen) {
-                MacosUtil.enterNativeFullscreen(window);
+                enterNativeFullscreen(windowHandle);
             }
         }
+    }
+
+    private static boolean isInNativeFullscreen(long windowHandle) {
+        return MacosUtil.getNsWindow(windowHandle).filter(MacosUtil::isInNativeFullscreen).isPresent();
+    }
+
+    private static void enterNativeFullscreen(long windowHandle) {
+        MacosUtil.getNsWindow(windowHandle)
+                .filter(nsWindow -> !MacosUtil.isInNativeFullscreen(nsWindow))
+                .ifPresent(MacosUtil::toggleNativeFullscreen);
     }
 
     private EarlyWindowHandoff() {}
